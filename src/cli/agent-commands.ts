@@ -1,4 +1,4 @@
-import type { Command } from "commander";
+import { InvalidArgumentError, type Command } from "commander";
 import { AgentChatClient } from "../sdk/agent-client.ts";
 import { subscribe } from "../sdk/live.ts";
 import { ConversationIdSchema } from "../shared/ids.ts";
@@ -14,8 +14,17 @@ import { print } from "./output.ts";
 
 type UrlOption = { readonly url?: string };
 
-const seconds = (raw: string): number => z.coerce.number().int().positive().parse(raw);
-const sequence = (raw: string): number => z.coerce.number().int().min(0).parse(raw);
+// Option parsers run before any command action, so a bad value is refused before anything is sent.
+function wholeNumber(schema: z.ZodNumber, expected: string): (raw: string) => number {
+  return (raw) => {
+    const parsed = schema.safeParse(Number(raw));
+    if (!parsed.success || raw.trim() === "")
+      throw new InvalidArgumentError(`expected ${expected}`);
+    return parsed.data;
+  };
+}
+const seconds = wholeNumber(z.number().int().positive(), "a whole number of seconds above 0");
+const sequence = wholeNumber(z.number().int().min(0), "a whole number, 0 or more");
 
 async function client(options: UrlOption): Promise<AgentChatClient> {
   const stored = await loadCredentials();
@@ -49,7 +58,7 @@ export function registerAgentCommands(program: Command): void {
     .argument("<text...>", "message text")
     .option("--conversation <id>", "continue this conversation")
     .option("--wait", "wait for Dori's reply and print it")
-    .option("--timeout <seconds>", "how long --wait waits", "600")
+    .option("--timeout <seconds>", "how long --wait waits", seconds, 600)
     .option("--url <url>", "gateway base URL")
     .action(
       async (
@@ -57,7 +66,7 @@ export function registerAgentCommands(program: Command): void {
         options: UrlOption & {
           readonly conversation?: string;
           readonly wait?: boolean;
-          readonly timeout: string;
+          readonly timeout: number;
         },
       ) => {
         const agent = await client(options);
@@ -76,7 +85,7 @@ export function registerAgentCommands(program: Command): void {
         }
         const reply = await agent.waitForReply(message.conversationId, {
           afterSeq: message.seq,
-          timeoutMs: seconds(options.timeout) * 1000,
+          timeoutMs: options.timeout * 1000,
         });
         print({ sent: message, reply });
       },
@@ -86,18 +95,18 @@ export function registerAgentCommands(program: Command): void {
     .command("wait")
     .description("wait for Dori's next reply in a conversation")
     .argument("<conversationId>")
-    .option("--after <seq>", "only replies after this sequence number", "0")
-    .option("--timeout <seconds>", "give up after this many seconds", "600")
+    .option("--after <seq>", "only replies after this sequence number", sequence, 0)
+    .option("--timeout <seconds>", "give up after this many seconds", seconds, 600)
     .option("--url <url>", "gateway base URL")
     .action(
       async (
         id: string,
-        options: UrlOption & { readonly after: string; readonly timeout: string },
+        options: UrlOption & { readonly after: number; readonly timeout: number },
       ) => {
         const agent = await client(options);
         const reply = await agent.waitForReply(ConversationIdSchema.parse(id), {
-          afterSeq: sequence(options.after),
-          timeoutMs: seconds(options.timeout) * 1000,
+          afterSeq: options.after,
+          timeoutMs: options.timeout * 1000,
         });
         print({ reply });
       },
@@ -107,13 +116,11 @@ export function registerAgentCommands(program: Command): void {
     .command("messages")
     .description("print a conversation's messages")
     .argument("<conversationId>")
-    .option("--after <seq>", "only messages after this sequence number", "0")
+    .option("--after <seq>", "only messages after this sequence number", sequence, 0)
     .option("--url <url>", "gateway base URL")
-    .action(async (id: string, options: UrlOption & { readonly after: string }) => {
+    .action(async (id: string, options: UrlOption & { readonly after: number }) => {
       const agent = await client(options);
-      print(
-        await agent.messages(ConversationIdSchema.parse(id), { after: sequence(options.after) }),
-      );
+      print(await agent.messages(ConversationIdSchema.parse(id), { after: options.after }));
     });
 
   program
