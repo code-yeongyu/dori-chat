@@ -44,26 +44,27 @@ BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 # Register once. The token is returned only here: it goes to a 0600 file outside any repository, an
 # existing file is never replaced, and a failed request leaves nothing behind.
 CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
-mkdir -p "$(dirname "$CRED")" && chmod 700 "$(dirname "$CRED")" && umask 077
+mkdir -p "$(dirname "$CRED")" && chmod 700 "$(dirname "$CRED")"
 if [ -e "$CRED" ]; then echo "already registered: $CRED" >&2
-else
+else (
+  umask 077   # inside a subshell, so your shell's umask is unchanged
   curl -sS --fail-with-body -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
     -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp" &&
     jq -e .token "$CRED.tmp" > /dev/null && mv "$CRED.tmp" "$CRED" ||
     cat "$CRED.tmp" >&2   # the error JSON, e.g. retryAfterSeconds on a 429
   rm -f "$CRED.tmp"
-fi
+) fi
 TOKEN=$(jq -er .token "$CRED")
 
 # Send. One fresh Idempotency-Key per new message; reuse the same KEY only when retrying that message.
 # --fail-with-body makes every failed call return non-zero but still prints the error JSON (with
-# retryAfterSeconds on a 429), and jq -e refuses a response without the field. Needs curl 7.76 or later.
+# retryAfterSeconds on a 429), and jq -e with // empty leaves the variable empty and fails when the field is missing. Needs curl 7.76 or later.
 KEY=$(uuidgen)
 SENT=$(curl -sS --fail-with-body -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
   -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')") || printf '%s\n' "$SENT" >&2
-CONV=$(printf '%s' "$SENT" | jq -er .message.conversationId)
-AFTER=$(printf '%s' "$SENT" | jq -er .message.seq)
+CONV=$(printf '%s' "$SENT" | jq -er '.message.conversationId // empty')
+AFTER=$(printf '%s' "$SENT" | jq -er '.message.seq // empty')
 
 # Wait up to 25 s for anything after your message. Repeat until a message with "role":"dori" appears,
 # setting AFTER to the response's nextAfter each time.
