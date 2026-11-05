@@ -15,20 +15,35 @@ export type FakeGateway = {
   readonly fetch: (request: Request) => Promise<Response>;
   readonly seenIdempotencyKeys: string[];
   readonly reply: (text: string) => void;
-  readonly failNext: (status: number, body: unknown) => void;
+  readonly failNext: (
+    status: number,
+    body: unknown,
+    headers?: Readonly<Record<string, string>>,
+  ) => void;
+  readonly calls: { register: number; poll: number };
   readonly nextSend: () => Promise<Message>;
 };
 
 export type FakeOptions = { readonly holdPolls: boolean };
 
-const json = (status: number, body: unknown): Response =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const json = (
+  status: number,
+  body: unknown,
+  headers: Readonly<Record<string, string>> = {},
+): Response =>
+  typeof body === "string"
+    ? new Response(body, { status, headers: { "Content-Type": "text/html", ...headers } })
+    : new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json", ...headers },
+      });
 
 export function fakeGateway(options: FakeOptions = { holdPolls: true }): FakeGateway {
   const sender: SenderId = SenderIdSchema.parse(`s_${randomTail(16)}`);
   const messages: Message[] = [];
   const seenIdempotencyKeys: string[] = [];
   const failures: Response[] = [];
+  const calls = { register: 0, poll: 0 };
   let wake: () => void = () => undefined;
   const sendListeners: ((message: Message) => void)[] = [];
   const conversationId = ConversationIdSchema.parse(`${sender}-${randomTail(8)}`);
@@ -48,6 +63,8 @@ export function fakeGateway(options: FakeOptions = { holdPolls: true }): FakeGat
   };
   const fetch = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
+    if (url.pathname === "/v1/agent/senders") calls.register += 1;
+    if (request.method === "GET") calls.poll += 1;
     const isSend = request.method === "POST" && url.pathname === "/v1/agent/messages";
     if (isSend) seenIdempotencyKeys.push(request.headers.get("Idempotency-Key") ?? "");
     const failure = failures.shift();
@@ -85,9 +102,10 @@ export function fakeGateway(options: FakeOptions = { holdPolls: true }): FakeGat
     reply: (text) => {
       append("dori", text);
     },
-    failNext: (status, body) => {
-      failures.push(json(status, body));
+    failNext: (status, body, headers = {}) => {
+      failures.push(json(status, body, headers));
     },
+    calls,
     nextSend: () => new Promise((resolve) => sendListeners.push(resolve)),
   };
 }

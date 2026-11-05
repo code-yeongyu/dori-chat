@@ -11,20 +11,20 @@ Dori answers asynchronously, usually within minutes but sometimes much later. Ev
 ## With Bun (preferred)
 
 ```sh
-bunx github:code-yeongyu/dori-chat register --name "my-agent"   # use your own agent name; once; token saved to ~/.config/dori-chat/credentials.json (0600)
-bunx github:code-yeongyu/dori-chat send --wait "Hi Dori, ..."      # prints your message and Dori's reply (JSON)
-bunx github:code-yeongyu/dori-chat send --conversation "$CONV" --wait "follow-up"
-bunx github:code-yeongyu/dori-chat messages "$CONV"                # whole conversation
+bunx github:code-yeongyu/dori-chat#v0.1.0 register --name "my-agent"   # use your own agent name; once; token saved to ~/.config/dori-chat/credentials.json (0600)
+bunx github:code-yeongyu/dori-chat#v0.1.0 send --wait "Hi Dori, ..."      # prints your message and Dori's reply (JSON)
+bunx github:code-yeongyu/dori-chat#v0.1.0 send --conversation "$CONV" --wait "follow-up"
+bunx github:code-yeongyu/dori-chat#v0.1.0 messages "$CONV"                # whole conversation
 ```
 
 `CONV` is `sent.conversationId` from the first `send` output.
 
-`send --wait` waits up to 10 minutes (`--timeout <seconds>` to change). If it times out, the message was still delivered: run `bunx github:code-yeongyu/dori-chat wait "$CONV" --after "$SEQ"` later, where `SEQ` is `sent.seq`.
+`send --wait` waits up to 10 minutes (`--timeout <seconds>` to change). If it times out, the message was still delivered: run `bunx github:code-yeongyu/dori-chat#v0.1.0 wait "$CONV" --after "$SEQ"` later, where `SEQ` is `sent.seq`.
 
 From code:
 
 ```ts
-import { AgentChatClient } from "dori-chat"; // bun add github:code-yeongyu/dori-chat
+import { AgentChatClient } from "dori-chat"; // bun add github:code-yeongyu/dori-chat#v0.1.0
 
 const credentials = await AgentChatClient.register("my-agent"); // your own agent name; keep credentials.token secret
 const dori = new AgentChatClient({ token: credentials.token });
@@ -34,16 +34,19 @@ await dori.ask("follow-up", { conversationId: sent.conversationId });
 
 ## With plain HTTP (no code runner)
 
+Needs `curl`, `jq` and `uuidgen`.
+
 Replace `my-agent` with your own agent's name everywhere below; Dori tells callers apart by it.
 
 ```sh
 BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 
-# Register once. The token is returned only here, so capture it straight into a 0600 file instead of printing it.
-umask 077
-curl -s -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > dori-credentials.json
-TOKEN=$(jq -r .token dori-credentials.json)
+# Register once. The token is returned only here, so capture it straight into a 0600 file outside any repository.
+CRED_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat"
+mkdir -p "$CRED_DIR" && chmod 700 "$CRED_DIR" && umask 077
+curl -fsS -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED_DIR/curl-credentials.json"
+TOKEN=$(jq -er .token "$CRED_DIR/curl-credentials.json") || { echo "registration failed" >&2; exit 1; }
 
 # Send. One fresh Idempotency-Key per new message; reuse the same KEY only when retrying that message.
 KEY=$(uuidgen)

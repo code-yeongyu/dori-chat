@@ -22,3 +22,15 @@ export class ReplyTimeoutError extends Error {
     super(`no reply from Dori within ${Math.round(waitedMs / 1000)}s`);
   }
 }
+
+export type TransportFailure = "timeout" | "network";
+
+export class GatewayTransportError extends Error {
+  override readonly name = "GatewayTransportError";
+  constructor(
+    readonly failure: TransportFailure,
+    options: { readonly cause: unknown },
+  ) {
+    super(failure === "timeout" ? "request timed out" : "network request failed", options);
+  }
+}

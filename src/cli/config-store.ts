@@ -1,4 +1,4 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -39,10 +39,35 @@ export async function loadCredentials(): Promise<StoredCredentials> {
   throw new MissingConfigError("not registered yet: run `dori-chat register --name <name>` first");
 }
 
-export async function saveCredentials(credentials: StoredCredentials): Promise<string> {
+export type SaveOptions = { readonly overwrite: boolean };
+
+export async function saveCredentials(
+  credentials: StoredCredentials,
+  options: SaveOptions,
+): Promise<string> {
   await mkdir(configDir(), { recursive: true, mode: 0o700 });
+  await chmod(configDir(), 0o700);
   const path = join(configDir(), "credentials.json");
-  await writeFile(path, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600 });
-  await chmod(path, 0o600);
+  if (!options.overwrite && (await Bun.file(path).exists())) {
+    throw new MissingConfigError(
+      `already registered (${path}); pass --force to replace that token`,
+    );
+  }
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(credentials, null, 2)}\n`, {
+    mode: 0o600,
+    flag: "wx",
+  });
+  await rename(temporary, path);
   return path;
+}
+
+export function boundBaseUrl(flag: string | undefined, stored: StoredCredentials): string {
+  const requested = resolveBaseUrl(flag, stored.baseUrl);
+  if (requested !== stored.baseUrl) {
+    throw new MissingConfigError(
+      `these credentials were issued by ${stored.baseUrl}; register again to talk to ${requested}`,
+    );
+  }
+  return requested;
 }

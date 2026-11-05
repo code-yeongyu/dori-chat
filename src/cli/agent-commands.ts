@@ -2,15 +2,19 @@ import type { Command } from "commander";
 import { AgentChatClient } from "../sdk/agent-client.ts";
 import { subscribe } from "../sdk/live.ts";
 import { ConversationIdSchema } from "../shared/ids.ts";
-import { loadCredentials, resolveBaseUrl, saveCredentials } from "./config-store.ts";
+import { z } from "zod";
+import { boundBaseUrl, loadCredentials, resolveBaseUrl, saveCredentials } from "./config-store.ts";
 import { print } from "./output.ts";
 
 type UrlOption = { readonly url?: string };
 
+const seconds = (raw: string): number => z.coerce.number().int().positive().parse(raw);
+const sequence = (raw: string): number => z.coerce.number().int().min(0).parse(raw);
+
 async function client(options: UrlOption): Promise<AgentChatClient> {
   const stored = await loadCredentials();
   return new AgentChatClient({
-    baseUrl: resolveBaseUrl(options.url, stored.baseUrl),
+    baseUrl: boundBaseUrl(options.url, stored),
     token: stored.token,
   });
 }
@@ -21,10 +25,14 @@ export function registerAgentCommands(program: Command): void {
     .description("register this agent once and store its token (0600) in the config dir")
     .requiredOption("--name <name>", "display name Dori will see")
     .option("--url <url>", "gateway base URL")
-    .action(async (options: UrlOption & { readonly name: string }) => {
+    .option("--force", "replace an existing registration")
+    .action(async (options: UrlOption & { readonly name: string; readonly force?: boolean }) => {
       const baseUrl = resolveBaseUrl(options.url, undefined);
       const credentials = await AgentChatClient.register(options.name, { baseUrl });
-      const path = await saveCredentials({ baseUrl, ...credentials });
+      const path = await saveCredentials(
+        { baseUrl, ...credentials },
+        { overwrite: options.force === true },
+      );
       print({ senderId: credentials.senderId, name: credentials.name, savedTo: path });
     });
 
@@ -61,7 +69,7 @@ export function registerAgentCommands(program: Command): void {
         }
         const reply = await agent.waitForReply(message.conversationId, {
           afterSeq: message.seq,
-          timeoutMs: Number(options.timeout) * 1000,
+          timeoutMs: seconds(options.timeout) * 1000,
         });
         print({ sent: message, reply });
       },
@@ -81,8 +89,8 @@ export function registerAgentCommands(program: Command): void {
       ) => {
         const agent = await client(options);
         const reply = await agent.waitForReply(ConversationIdSchema.parse(id), {
-          afterSeq: Number(options.after),
-          timeoutMs: Number(options.timeout) * 1000,
+          afterSeq: sequence(options.after),
+          timeoutMs: seconds(options.timeout) * 1000,
         });
         print({ reply });
       },
@@ -96,7 +104,9 @@ export function registerAgentCommands(program: Command): void {
     .option("--url <url>", "gateway base URL")
     .action(async (id: string, options: UrlOption & { readonly after: string }) => {
       const agent = await client(options);
-      print(await agent.messages(ConversationIdSchema.parse(id), { after: Number(options.after) }));
+      print(
+        await agent.messages(ConversationIdSchema.parse(id), { after: sequence(options.after) }),
+      );
     });
 
   program
@@ -117,8 +127,18 @@ export function registerAgentCommands(program: Command): void {
       subscribe({
         conversationId: ConversationIdSchema.parse(id),
         token: stored.token,
-        baseUrl: resolveBaseUrl(options.url, stored.baseUrl),
+        baseUrl: boundBaseUrl(options.url, stored),
         onMessage: (message) => print(message),
+        onInvalidFrame: (raw) =>
+          process.stderr.write(
+            `dori-chat: ignored a frame that is not a message: ${raw.slice(0, 200)}\n`,
+          ),
+        onClose: (code, reason) => {
+          process.stderr.write(
+            `dori-chat: live connection closed (${code}${reason === "" ? "" : ` ${reason}`})\n`,
+          );
+          process.exit(code === 1000 ? 0 : 2);
+        },
       });
       await new Promise<void>((resolve) => process.once("SIGINT", () => resolve()));
     });
