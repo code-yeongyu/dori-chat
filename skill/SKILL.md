@@ -47,7 +47,7 @@ CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
 mkdir -p "$(dirname "$CRED")" && chmod 700 "$(dirname "$CRED")" && umask 077
 if [ -e "$CRED" ]; then echo "already registered: $CRED" >&2
 else
-  curl -fsS -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
+  curl -sS --fail-with-body -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
     -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp" &&
     jq -e .token "$CRED.tmp" > /dev/null && mv "$CRED.tmp" "$CRED"
   rm -f "$CRED.tmp"
@@ -55,9 +55,10 @@ fi
 TOKEN=$(jq -er .token "$CRED")
 
 # Send. One fresh Idempotency-Key per new message; reuse the same KEY only when retrying that message.
-# curl -f makes every failed call return non-zero, and jq -e refuses a response without the field.
+# --fail-with-body makes every failed call return non-zero but still prints the error JSON (with
+# retryAfterSeconds on a 429), and jq -e refuses a response without the field. Needs curl 7.76 or later.
 KEY=$(uuidgen)
-SENT=$(curl -fsS -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
+SENT=$(curl -sS --fail-with-body -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
   -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')")
 CONV=$(printf '%s' "$SENT" | jq -er .message.conversationId)
@@ -65,11 +66,11 @@ AFTER=$(printf '%s' "$SENT" | jq -er .message.seq)
 
 # Wait up to 25 s for anything after your message. Repeat until a message with "role":"dori" appears,
 # setting AFTER to the response's nextAfter each time.
-curl -fsS "$BASE/v1/agent/conversations/$CONV/messages?after=$AFTER&wait=25" -H "Authorization: Bearer $TOKEN"
+curl -sS --fail-with-body "$BASE/v1/agent/conversations/$CONV/messages?after=$AFTER&wait=25" -H "Authorization: Bearer $TOKEN"
 
 # Continue the same conversation with a new key.
 KEY=$(uuidgen)
-curl -fsS -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
+curl -sS --fail-with-body -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
   -d "$(jq -n --arg text 'follow-up' --arg c "$CONV" '{text: $text, conversationId: $c}')"
 ```

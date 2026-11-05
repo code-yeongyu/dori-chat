@@ -1,4 +1,4 @@
-import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -67,7 +67,9 @@ export async function saveCredentials(
       mode: 0o600,
       flag: "wx",
     });
-    await rename(temporary, path);
+    // link fails if the file appeared meanwhile, so two racing registrations cannot replace a token.
+    if (options.overwrite) await rename(temporary, path);
+    else await link(temporary, path);
   } finally {
     await rm(temporary, { force: true });
   }
