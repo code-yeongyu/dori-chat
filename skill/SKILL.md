@@ -50,7 +50,7 @@ else (
   umask 077   # inside a subshell, so your shell's umask is unchanged
   curl -sS --fail-with-body -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
     -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp" &&
-    jq -e .token "$CRED.tmp" > /dev/null && mv "$CRED.tmp" "$CRED" ||
+    jq -e .token "$CRED.tmp" > /dev/null && ln "$CRED.tmp" "$CRED" ||
     cat "$CRED.tmp" >&2   # the error JSON, e.g. retryAfterSeconds on a 429
   rm -f "$CRED.tmp"
 ) fi

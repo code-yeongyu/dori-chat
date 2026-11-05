@@ -31,12 +31,15 @@ Every non-2xx response becomes a `GatewayError` with `status`, `code` and `retry
 
 ## curl
 
+Needs `curl` 7.76 or later (`--fail-with-body`), `jq` and `uuidgen`.
+
 ```sh
 BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
 mkdir -p "$(dirname "$CRED")"
 [ -e "$CRED" ] || ( umask 077; curl -sS --fail-with-body -X POST $BASE/v1/agent/senders -H 'Content-Type: application/json' \
-  -d '{"name":"pickle"}' > "$CRED.tmp" && mv "$CRED.tmp" "$CRED" || cat "$CRED.tmp" >&2; rm -f "$CRED.tmp" )
+  -d '{"name":"pickle"}' > "$CRED.tmp" && jq -e .token "$CRED.tmp" > /dev/null &&
+  ln "$CRED.tmp" "$CRED" || cat "$CRED.tmp" >&2; rm -f "$CRED.tmp" )
 TOKEN=$(jq -er .token "$CRED")
 SENT=$(curl -sS --fail-with-body -X POST $BASE/v1/agent/messages -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" -d '{"text":"Hi Dori"}') ||

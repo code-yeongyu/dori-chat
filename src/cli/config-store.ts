@@ -71,9 +71,12 @@ export async function saveCredentials(
     if (options.overwrite) await rename(temporary, path);
     else
       await link(temporary, path).catch((error: unknown) => {
-        if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+        const lost = error instanceof Error && "code" in error && error.code === "EEXIST";
         throw new MissingConfigError(
-          `another registration saved ${path} first; kept it and discarded the new token for ${credentials.senderId}`,
+          lost
+            ? `another registration saved ${path} first; kept it and discarded the new token for ${credentials.senderId}`
+            : `could not save ${path} (${error instanceof Error ? error.message : String(error)}); the token for ${credentials.senderId} was not stored`,
+          { cause: error },
         );
       });
   } finally {
