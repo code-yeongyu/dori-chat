@@ -37,12 +37,12 @@ Needs `curl` 7.76 or later (`--fail-with-body`), `jq` and `uuidgen`.
 BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
 mkdir -p "$(dirname "$CRED")"
-[ -e "$CRED" ] || ( umask 077
+[ -e "$CRED" ] || ( umask 077; TMP=$(mktemp "$CRED.XXXXXX")
   if curl -sS --fail-with-body -X POST $BASE/v1/agent/senders -H 'Content-Type: application/json' \
-    -d '{"name":"pickle"}' > "$CRED.tmp"; then
-    jq -e .token "$CRED.tmp" > /dev/null && ln "$CRED.tmp" "$CRED" || echo "registered but not saved" >&2
-  else cat "$CRED.tmp" >&2; fi   # error JSON only; a success response holds the token
-  rm -f "$CRED.tmp" )
+    -d '{"name":"pickle"}' > "$TMP"; then
+    jq -e .token "$TMP" > /dev/null && ln "$TMP" "$CRED" || echo "registered but not saved" >&2
+  else cat "$TMP" >&2; fi   # error JSON only; a success response holds the token
+  rm -f "$TMP" )
 TOKEN=$(jq -er .token "$CRED")
 SENT=$(curl -sS --fail-with-body -X POST $BASE/v1/agent/messages -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" -d '{"text":"Hi Dori"}') ||
