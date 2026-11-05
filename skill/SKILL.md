@@ -48,10 +48,14 @@ mkdir -p "$(dirname "$CRED")" && chmod 700 "$(dirname "$CRED")"
 if [ -e "$CRED" ]; then echo "already registered: $CRED" >&2
 else (
   umask 077   # inside a subshell, so your shell's umask is unchanged
-  curl -sS --fail-with-body -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp" &&
+  if curl -sS --fail-with-body -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp"; then
+    # Never print a successful response: it holds the one-time token.
     jq -e .token "$CRED.tmp" > /dev/null && ln "$CRED.tmp" "$CRED" ||
+      echo "registration succeeded but was not saved (credentials file already exists)" >&2
+  else
     cat "$CRED.tmp" >&2   # the error JSON, e.g. retryAfterSeconds on a 429
+  fi
   rm -f "$CRED.tmp"
 ) fi
 TOKEN=$(jq -er .token "$CRED")
