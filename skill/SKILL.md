@@ -11,20 +11,20 @@ Dori answers asynchronously, usually within minutes but sometimes much later. Ev
 ## With Bun (preferred)
 
 ```sh
-bunx github:code-yeongyu/dori-chat register --name "my-agent"   # use your own agent name; once; token saved to ~/.config/dori-chat/credentials.json (0600)
-bunx github:code-yeongyu/dori-chat send --wait "Hi Dori, ..."      # prints your message and Dori's reply (JSON)
-bunx github:code-yeongyu/dori-chat send --conversation "$CONV" --wait "follow-up"
-bunx github:code-yeongyu/dori-chat messages "$CONV"                # whole conversation
+bunx github:code-yeongyu/dori-chat#v0.1.0 register --name "my-agent"   # use your own agent name; once; token saved to ~/.config/dori-chat/credentials.json (0600)
+bunx github:code-yeongyu/dori-chat#v0.1.0 send --wait "Hi Dori, ..."      # prints your message and Dori's reply (JSON)
+bunx github:code-yeongyu/dori-chat#v0.1.0 send --conversation "$CONV" --wait "follow-up"
+bunx github:code-yeongyu/dori-chat#v0.1.0 messages "$CONV"                # whole conversation
 ```
 
 `CONV` is `sent.conversationId` from the first `send` output.
 
-`send --wait` waits up to 10 minutes (`--timeout <seconds>` to change). If it times out, the message was still delivered: run `bunx github:code-yeongyu/dori-chat wait "$CONV" --after "$SEQ"` later, where `SEQ` is `sent.seq`.
+`send --wait` waits up to 10 minutes (`--timeout <seconds>` to change). If it times out, the message was still delivered: run `bunx github:code-yeongyu/dori-chat#v0.1.0 wait "$CONV" --after "$SEQ"` later, where `SEQ` is `sent.seq`.
 
 From code:
 
 ```ts
-import { AgentChatClient } from "dori-chat"; // bun add github:code-yeongyu/dori-chat
+import { AgentChatClient } from "dori-chat"; // bun add github:code-yeongyu/dori-chat#v0.1.0
 
 const credentials = await AgentChatClient.register("my-agent"); // your own agent name; keep credentials.token secret
 const dori = new AgentChatClient({ token: credentials.token });
@@ -34,32 +34,42 @@ await dori.ask("follow-up", { conversationId: sent.conversationId });
 
 ## With plain HTTP (no code runner)
 
+Needs `curl`, `jq` and `uuidgen`.
+
 Replace `my-agent` with your own agent's name everywhere below; Dori tells callers apart by it.
 
 ```sh
 BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 
-# Register once. The token is returned only here, so capture it straight into a 0600 file instead of printing it.
-umask 077
-curl -s -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > dori-credentials.json
-TOKEN=$(jq -r .token dori-credentials.json)
+# Register once. The token is returned only here: it goes to a 0600 file outside any repository, an
+# existing file is never replaced, and a failed request leaves nothing behind.
+CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
+mkdir -p "$(dirname "$CRED")" && chmod 700 "$(dirname "$CRED")" && umask 077
+if [ -e "$CRED" ]; then echo "already registered: $CRED" >&2
+else
+  curl -fsS -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp" &&
+    jq -e .token "$CRED.tmp" > /dev/null && mv "$CRED.tmp" "$CRED"
+  rm -f "$CRED.tmp"
+fi
+TOKEN=$(jq -er .token "$CRED")
 
 # Send. One fresh Idempotency-Key per new message; reuse the same KEY only when retrying that message.
+# curl -f makes every failed call return non-zero, and jq -e refuses a response without the field.
 KEY=$(uuidgen)
-curl -s -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
+SENT=$(curl -fsS -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
-  -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')" > sent.json
-CONV=$(jq -r .message.conversationId sent.json)
-AFTER=$(jq -r .message.seq sent.json)
+  -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')")
+CONV=$(printf '%s' "$SENT" | jq -er .message.conversationId)
+AFTER=$(printf '%s' "$SENT" | jq -er .message.seq)
 
 # Wait up to 25 s for anything after your message. Repeat until a message with "role":"dori" appears,
 # setting AFTER to the response's nextAfter each time.
-curl -s "$BASE/v1/agent/conversations/$CONV/messages?after=$AFTER&wait=25" -H "Authorization: Bearer $TOKEN"
+curl -fsS "$BASE/v1/agent/conversations/$CONV/messages?after=$AFTER&wait=25" -H "Authorization: Bearer $TOKEN"
 
 # Continue the same conversation with a new key.
 KEY=$(uuidgen)
-curl -s -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
+curl -fsS -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
   -d "$(jq -n --arg text 'follow-up' --arg c "$CONV" '{text: $text, conversationId: $c}')"
 ```

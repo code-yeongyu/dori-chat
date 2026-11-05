@@ -8,6 +8,8 @@ export type LiveSubscription = {
   readonly token: string;
   readonly baseUrl?: string;
   readonly onMessage: (message: Message) => void;
+  readonly onClose?: (code: number, reason: string) => void;
+  readonly onInvalidFrame?: (raw: string) => void;
 };
 
 export function socketUrl(baseUrl: string, path: string): string {
@@ -28,6 +30,8 @@ export function subscribe(subscription: LiveSubscription): WebSocket {
     if (typeof event.data !== "string") return;
     const frame = LiveFrameSchema.safeParse(parseJson(event.data));
     if (frame.success) subscription.onMessage(frame.data.message);
+    else subscription.onInvalidFrame?.(event.data);
   });
+  socket.addEventListener("close", (event) => subscription.onClose?.(event.code, event.reason));
   return socket;
 }

@@ -1,8 +1,8 @@
-import ky, { HTTPError, type KyInstance } from "ky";
+import ky, { HTTPError, NetworkError, TimeoutError, type KyInstance } from "ky";
 import type { z } from "zod";
 import { parseJson } from "../shared/json.ts";
 import { ErrorBodySchema } from "../shared/schemas.ts";
-import { GatewayError } from "./errors.ts";
+import { GatewayError, GatewayTransportError } from "./errors.ts";
 
 export const DEFAULT_BASE_URL = "https://dori-chat-gateway.code-yeon-gyu.workers.dev";
 
@@ -49,22 +49,42 @@ export class GatewayHttp {
         retry:
           spec.retry === false
             ? 0
-            : { limit: 2, methods: ["get", "post"], statusCodes: RETRY_STATUS },
+            : {
+                limit: 2,
+                methods: ["get", "post"],
+                statusCodes: RETRY_STATUS,
+                retryOnTimeout: true,
+              },
       }).text();
       return spec.schema.parse(parseJson(body));
     } catch (error) {
-      if (error instanceof HTTPError) throw gatewayErrorFrom(error.response.status, error.data);
+      if (error instanceof HTTPError) throw gatewayErrorFrom(error.response, error.data);
+      if (error instanceof TimeoutError)
+        throw new GatewayTransportError("timeout", { cause: error });
+      if (error instanceof NetworkError)
+        throw new GatewayTransportError("network", { cause: error });
       throw error;
     }
   }
 }
 
-function gatewayErrorFrom(status: number, data: unknown): GatewayError {
+function retryAfterHeader(response: Response): number | undefined {
+  const seconds = Number(response.headers.get("Retry-After"));
+  return Number.isInteger(seconds) && seconds > 0 ? seconds : undefined;
+}
+
+function gatewayErrorFrom(response: Response, data: unknown): GatewayError {
+  const { status } = response;
   const parsed = ErrorBodySchema.safeParse(typeof data === "string" ? parseJson(data) : data);
+  const body = parsed.success
+    ? parsed.data
+    : { error: { code: "internal" as const, message: `unexpected ${status} response` } };
+  const fromHeader = retryAfterHeader(response);
   return new GatewayError({
     status,
-    body: parsed.success
-      ? parsed.data
-      : { error: { code: "internal", message: `unexpected ${status} response` } },
+    body:
+      body.retryAfterSeconds === undefined && fromHeader !== undefined
+        ? { ...body, retryAfterSeconds: fromHeader }
+        : body,
   });
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
-import { GatewayError, ReplyTimeoutError } from "../sdk/errors.ts";
+import { GatewayError, GatewayTransportError, ReplyTimeoutError } from "../sdk/errors.ts";
 import { registerAgentCommands } from "./agent-commands.ts";
 import { MissingConfigError } from "./config-store.ts";
 
@@ -17,6 +17,7 @@ try {
   // no-excuse-ok: catch (CLI entry boundary prints the failure and exits non-zero)
   const known =
     error instanceof GatewayError ||
+    error instanceof GatewayTransportError ||
     error instanceof ReplyTimeoutError ||
     error instanceof MissingConfigError;
   process.stderr.write(`dori-chat: ${error instanceof Error ? error.message : String(error)}\n`);

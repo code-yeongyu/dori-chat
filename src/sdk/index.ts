@@ -7,7 +7,13 @@ export {
   type SendOptions,
   type WaitOptions,
 } from "./agent-client.ts";
-export { GatewayError, ReplyTimeoutError, type GatewayErrorInit } from "./errors.ts";
+export {
+  GatewayError,
+  GatewayTransportError,
+  ReplyTimeoutError,
+  type GatewayErrorInit,
+  type TransportFailure,
+} from "./errors.ts";
 export {
   DEFAULT_BASE_URL,
   GatewayHttp,
