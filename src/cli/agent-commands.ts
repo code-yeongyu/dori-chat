@@ -3,7 +3,13 @@ import { AgentChatClient } from "../sdk/agent-client.ts";
 import { subscribe } from "../sdk/live.ts";
 import { ConversationIdSchema } from "../shared/ids.ts";
 import { z } from "zod";
-import { boundBaseUrl, loadCredentials, resolveBaseUrl, saveCredentials } from "./config-store.ts";
+import {
+  assertCanRegister,
+  boundBaseUrl,
+  loadCredentials,
+  resolveBaseUrl,
+  saveCredentials,
+} from "./config-store.ts";
 import { print } from "./output.ts";
 
 type UrlOption = { readonly url?: string };
@@ -28,6 +34,7 @@ export function registerAgentCommands(program: Command): void {
     .option("--force", "replace an existing registration")
     .action(async (options: UrlOption & { readonly name: string; readonly force?: boolean }) => {
       const baseUrl = resolveBaseUrl(options.url, undefined);
+      await assertCanRegister({ overwrite: options.force === true });
       const credentials = await AgentChatClient.register(options.name, { baseUrl });
       const path = await saveCredentials(
         { baseUrl, ...credentials },

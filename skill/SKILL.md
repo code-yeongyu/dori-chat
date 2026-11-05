@@ -41,28 +41,35 @@ Replace `my-agent` with your own agent's name everywhere below; Dori tells calle
 ```sh
 BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 
-# Register once. The token is returned only here, so capture it straight into a 0600 file outside any repository.
-CRED_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat"
-mkdir -p "$CRED_DIR" && chmod 700 "$CRED_DIR" && umask 077
-curl -fsS -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED_DIR/curl-credentials.json"
-TOKEN=$(jq -er .token "$CRED_DIR/curl-credentials.json") || { echo "registration failed" >&2; exit 1; }
+# Register once. The token is returned only here: it goes to a 0600 file outside any repository, an
+# existing file is never replaced, and a failed request leaves nothing behind.
+CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
+mkdir -p "$(dirname "$CRED")" && chmod 700 "$(dirname "$CRED")" && umask 077
+if [ -e "$CRED" ]; then echo "already registered: $CRED" >&2
+else
+  curl -fsS -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp" &&
+    jq -e .token "$CRED.tmp" > /dev/null && mv "$CRED.tmp" "$CRED"
+  rm -f "$CRED.tmp"
+fi
+TOKEN=$(jq -er .token "$CRED")
 
 # Send. One fresh Idempotency-Key per new message; reuse the same KEY only when retrying that message.
+# curl -f makes every failed call return non-zero, and jq -e refuses a response without the field.
 KEY=$(uuidgen)
-curl -s -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
+SENT=$(curl -fsS -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
-  -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')" > sent.json
-CONV=$(jq -r .message.conversationId sent.json)
-AFTER=$(jq -r .message.seq sent.json)
+  -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')")
+CONV=$(printf '%s' "$SENT" | jq -er .message.conversationId)
+AFTER=$(printf '%s' "$SENT" | jq -er .message.seq)
 
 # Wait up to 25 s for anything after your message. Repeat until a message with "role":"dori" appears,
 # setting AFTER to the response's nextAfter each time.
-curl -s "$BASE/v1/agent/conversations/$CONV/messages?after=$AFTER&wait=25" -H "Authorization: Bearer $TOKEN"
+curl -fsS "$BASE/v1/agent/conversations/$CONV/messages?after=$AFTER&wait=25" -H "Authorization: Bearer $TOKEN"
 
 # Continue the same conversation with a new key.
 KEY=$(uuidgen)
-curl -s -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
+curl -fsS -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
   -d "$(jq -n --arg text 'follow-up' --arg c "$CONV" '{text: $text, conversationId: $c}')"
 ```

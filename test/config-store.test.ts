@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { boundBaseUrl, saveCredentials, type StoredCredentials } from "../src/cli/config-store.ts";
+import {
+  assertCanRegister,
+  boundBaseUrl,
+  saveCredentials,
+  type StoredCredentials,
+} from "../src/cli/config-store.ts";
 import { SenderIdSchema } from "../src/shared/ids.ts";
 
 const credentials: StoredCredentials = {
@@ -46,5 +51,23 @@ describe("stored credentials", () => {
   test("the token is only sent to the gateway that issued it", () => {
     expect(boundBaseUrl(undefined, credentials)).toBe("https://gateway.test");
     expect(() => boundBaseUrl("https://elsewhere.test", credentials)).toThrow();
+  });
+
+  test("the pre-register check refuses an existing registration unless forced", async () => {
+    await saveCredentials(credentials, { overwrite: false });
+
+    expect(assertCanRegister({ overwrite: false })).rejects.toThrow("already registered");
+    expect(assertCanRegister({ overwrite: true })).resolves.toBeUndefined();
+  });
+
+  test("a save that cannot complete leaves no temporary file behind", async () => {
+    await mkdir(join(home, "credentials.json", "occupied"), { recursive: true });
+
+    const failed = await saveCredentials(credentials, { overwrite: true }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(failed).toBeInstanceOf(Error);
+    expect((await readdir(home)).toSorted()).toEqual(["credentials.json"]);
   });
 });

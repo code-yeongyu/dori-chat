@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { AgentChatClient, ConversationIdSchema, GatewayError } from "../src/sdk/index.ts";
+import {
+  AgentChatClient,
+  ConversationIdSchema,
+  GatewayError,
+  GatewayTransportError,
+  SenderIdSchema,
+} from "../src/sdk/index.ts";
 import { fakeGateway } from "./support/fake-gateway.ts";
 
 const BASE_URL = "http://gateway.test";
@@ -40,5 +46,41 @@ describe("SDK transport policy", () => {
 
     expect(failure).toBeInstanceOf(GatewayError);
     expect(failure).toMatchObject({ status: 429, code: "internal", retryAfterSeconds: 17 });
+  });
+
+  test("a request that never answers is retried, then surfaces as a timeout", async () => {
+    let attempts = 0;
+    const hanging = (request: Request): Promise<Response> => {
+      attempts += 1;
+      return new Promise((_, reject) =>
+        request.signal.addEventListener("abort", () => reject(request.signal.reason)),
+      );
+    };
+    const client = new AgentChatClient({
+      baseUrl: BASE_URL,
+      fetch: hanging,
+      token: "t",
+      timeoutMs: 50,
+    });
+
+    const failure = await client
+      .messages(
+        ConversationIdSchema.parse(`${SenderIdSchema.parse("s_0123456789abcdef")}-c0000001`),
+      )
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(GatewayTransportError);
+    expect(failure).toMatchObject({ failure: "timeout" });
+    expect(attempts).toBe(3);
+  });
+
+  test("an unreachable gateway surfaces as a network failure", async () => {
+    const refused = (): Promise<Response> => Promise.reject(new TypeError("fetch failed"));
+    const client = new AgentChatClient({ baseUrl: BASE_URL, fetch: refused, token: "t" });
+
+    const failure = await client.send("hi").catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(GatewayTransportError);
+    expect(failure).toMatchObject({ failure: "network" });
   });
 });
