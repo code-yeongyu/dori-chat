@@ -36,11 +36,12 @@ BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
 mkdir -p "$(dirname "$CRED")" && umask 077
 [ -e "$CRED" ] || { curl -sS --fail-with-body -X POST $BASE/v1/agent/senders -H 'Content-Type: application/json' \
-  -d '{"name":"pickle"}' > "$CRED.tmp" && mv "$CRED.tmp" "$CRED"; rm -f "$CRED.tmp"; }
+  -d '{"name":"pickle"}' > "$CRED.tmp" && mv "$CRED.tmp" "$CRED" || cat "$CRED.tmp" >&2; rm -f "$CRED.tmp"; }
 TOKEN=$(jq -er .token "$CRED")
-CONV=$(curl -sS --fail-with-body -X POST $BASE/v1/agent/messages -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" -d '{"text":"Hi Dori"}' |
-  jq -er .message.conversationId)
+SENT=$(curl -sS --fail-with-body -X POST $BASE/v1/agent/messages -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" -d '{"text":"Hi Dori"}') ||
+  printf '%s\n' "$SENT" >&2   # the error JSON, e.g. retryAfterSeconds on a 429
+CONV=$(printf '%s' "$SENT" | jq -er .message.conversationId)
 curl -sS --fail-with-body "$BASE/v1/agent/conversations/$CONV/messages?after=1&wait=25" -H "Authorization: Bearer $TOKEN"
 ```
 

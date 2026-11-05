@@ -69,7 +69,13 @@ export async function saveCredentials(
     });
     // link fails if the file appeared meanwhile, so two racing registrations cannot replace a token.
     if (options.overwrite) await rename(temporary, path);
-    else await link(temporary, path);
+    else
+      await link(temporary, path).catch((error: unknown) => {
+        if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+        throw new MissingConfigError(
+          `another registration saved ${path} first; kept it and discarded the new token for ${credentials.senderId}`,
+        );
+      });
   } finally {
     await rm(temporary, { force: true });
   }

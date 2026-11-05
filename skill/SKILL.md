@@ -49,7 +49,8 @@ if [ -e "$CRED" ]; then echo "already registered: $CRED" >&2
 else
   curl -sS --fail-with-body -X POST "$BASE/v1/agent/senders" -H 'Content-Type: application/json' \
     -d "$(jq -n --arg name 'my-agent' '{name: $name}')" > "$CRED.tmp" &&
-    jq -e .token "$CRED.tmp" > /dev/null && mv "$CRED.tmp" "$CRED"
+    jq -e .token "$CRED.tmp" > /dev/null && mv "$CRED.tmp" "$CRED" ||
+    cat "$CRED.tmp" >&2   # the error JSON, e.g. retryAfterSeconds on a 429
   rm -f "$CRED.tmp"
 fi
 TOKEN=$(jq -er .token "$CRED")
@@ -60,7 +61,7 @@ TOKEN=$(jq -er .token "$CRED")
 KEY=$(uuidgen)
 SENT=$(curl -sS --fail-with-body -X POST "$BASE/v1/agent/messages" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
-  -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')")
+  -d "$(jq -n --arg text 'Hi Dori' '{text: $text}')") || printf '%s\n' "$SENT" >&2
 CONV=$(printf '%s' "$SENT" | jq -er .message.conversationId)
 AFTER=$(printf '%s' "$SENT" | jq -er .message.seq)
 
