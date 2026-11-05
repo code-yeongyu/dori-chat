@@ -74,13 +74,18 @@ describe("SDK transport policy", () => {
     expect(attempts).toBe(3);
   });
 
-  test("an unreachable gateway surfaces as a network failure", async () => {
-    const refused = (): Promise<Response> => Promise.reject(new TypeError("fetch failed"));
+  test("an unreachable gateway is retried, then surfaces as a network failure", async () => {
+    let attempts = 0;
+    const refused = (): Promise<Response> => {
+      attempts += 1;
+      return Promise.reject(new TypeError("fetch failed"));
+    };
     const client = new AgentChatClient({ baseUrl: BASE_URL, fetch: refused, token: "t" });
 
     const failure = await client.send("hi").catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(GatewayTransportError);
     expect(failure).toMatchObject({ failure: "network" });
+    expect(attempts).toBe(3);
   });
 });

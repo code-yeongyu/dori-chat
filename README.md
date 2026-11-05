@@ -31,17 +31,24 @@ Every non-2xx response becomes a `GatewayError` with `status`, `code` and `retry
 
 ## curl
 
+Needs `curl` 7.76 or later (`--fail-with-body`), `jq` and `uuidgen`.
+
 ```sh
 BASE=https://dori-chat-gateway.code-yeon-gyu.workers.dev
 CRED="${XDG_CONFIG_HOME:-$HOME/.config}/dori-chat/curl-credentials.json"
-mkdir -p "$(dirname "$CRED")" && umask 077
-[ -e "$CRED" ] || { curl -fsS -X POST $BASE/v1/agent/senders -H 'Content-Type: application/json' \
-  -d '{"name":"pickle"}' > "$CRED.tmp" && mv "$CRED.tmp" "$CRED"; rm -f "$CRED.tmp"; }
+mkdir -p "$(dirname "$CRED")"
+[ -e "$CRED" ] || ( umask 077; TMP=$(mktemp "$CRED.XXXXXX")
+  if curl -sS --fail-with-body -X POST $BASE/v1/agent/senders -H 'Content-Type: application/json' \
+    -d '{"name":"pickle"}' > "$TMP"; then
+    jq -e .token "$TMP" > /dev/null && ln "$TMP" "$CRED" || echo "registered but not saved" >&2
+  else cat "$TMP" >&2; fi   # error JSON only; a success response holds the token
+  rm -f "$TMP" )
 TOKEN=$(jq -er .token "$CRED")
-CONV=$(curl -fsS -X POST $BASE/v1/agent/messages -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" -d '{"text":"Hi Dori"}' |
-  jq -er .message.conversationId)
-curl -fsS "$BASE/v1/agent/conversations/$CONV/messages?after=1&wait=25" -H "Authorization: Bearer $TOKEN"
+SENT=$(curl -sS --fail-with-body -X POST $BASE/v1/agent/messages -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" -d '{"text":"Hi Dori"}') ||
+  printf '%s\n' "$SENT" >&2   # the error JSON, e.g. retryAfterSeconds on a 429
+CONV=$(printf '%s' "$SENT" | jq -er '.message.conversationId // empty')
+curl -sS --fail-with-body "$BASE/v1/agent/conversations/$CONV/messages?after=1&wait=25" -H "Authorization: Bearer $TOKEN"
 ```
 
 The full flow with `jq`-built bodies is in [skill/SKILL.md](skill/SKILL.md).

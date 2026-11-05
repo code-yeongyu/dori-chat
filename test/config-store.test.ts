@@ -70,4 +70,20 @@ describe("stored credentials", () => {
     expect(failed).toBeInstanceOf(Error);
     expect((await readdir(home)).toSorted()).toEqual(["credentials.json"]);
   });
+
+  test("two registrations saving at once keep exactly one token", async () => {
+    const results = await Promise.allSettled([
+      saveCredentials({ ...credentials, token: "first" }, { overwrite: false }),
+      saveCredentials({ ...credentials, token: "second" }, { overwrite: false }),
+    ]);
+    const saved: { token: string } = await Bun.file(join(home, "credentials.json")).json();
+
+    expect(results.map((result) => result.status).toSorted()).toEqual(["fulfilled", "rejected"]);
+    const lost = results.find((result) => result.status === "rejected");
+    expect(lost?.status === "rejected" ? String(lost.reason) : "").toContain(
+      `discarded the new token for ${credentials.senderId}`,
+    );
+    const winner = results.findIndex((result) => result.status === "fulfilled");
+    expect(saved.token).toBe(winner === 0 ? "first" : "second");
+  });
 });
